@@ -18,7 +18,7 @@ vim.keymap.set({'n', 'x'}, 'X', '"_d', {desc = 'Cut text'})
 vim.keymap.set('n', '<leader>w', '<cmd>write<cr>', {desc = 'Save buffer'})
 vim.keymap.set('n', '<leader>bq', '<cmd>bdelete<cr>', {desc = 'Close buffer'})
 vim.keymap.set('n', '<leader>bl', '<cmd>buffer #<cr>', {desc = 'Go to last active buffer'})
-vim.keymap.set('n', '<leader>c', '<cmd>CodeCompanion<cr>', {desc = 'Code Companion prompt'})
+vim.keymap.set('n', '<leader>c', '<cmd>CodeCompanion toggle<cr>', {desc = 'Code Companion prompt'})
 
 vim.keymap.set('n', '<leader>bb', '<cmd>buffer #<cr>', {desc = 'Go to last active buffer'})
 vim.keymap.set('n', '<leader>ww', '<cmd>set wrap!<cr>', {desc = 'Toggle word wrapping'})
