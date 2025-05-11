@@ -31,12 +31,12 @@ Plugin.opts = {
 }
 
 Plugin.adapters = {
-    llama3 = function()
+  llama3 = function()
       return require("codecompanion.adapters").extend("ollama", {
-        name = "llama3", -- Give this adapter a different name to differentiate it from the default ollama adapter
+        name = "deepseek", -- Give this adapter a different name to differentiate it from the default ollama adapter
         schema = {
           model = {
-            default = "qwen2.5-coder:7b",
+            default = "deepseek-r1:14b",
           },
           num_ctx = {
             default = 16384,
@@ -46,8 +46,8 @@ Plugin.adapters = {
           },
         },
       })
-    end,
-  }
+  end
+}
 
 -- require("lazy.minit").repro({ spec = plugins })
 
