@@ -13,9 +13,9 @@ Plugin.dependencies = {
             ["<S-Tab>"] = { "select_prev", "fallback" },
             ["<Tab>"] = { "select_next", "fallback" },
           },
+          cmdline = { sources = { "cmdline" } },
           sources = {
             default = { "lsp", "path", "buffer", "codecompanion" },
-            cmdline = {}, -- Disable sources for command-line mode
           },
         },
     },
