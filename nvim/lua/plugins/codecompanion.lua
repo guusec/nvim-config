@@ -4,6 +4,10 @@ Plugin.dependencies = {
 	"nvim-lua/plenary.nvim",
 	"nvim-treesitter/nvim-treesitter",
 	{
+  "MeanderingProgrammer/render-markdown.nvim",
+  ft = { "markdown", "codecompanion" }
+},
+	{
         "saghen/blink.cmp",
         lazy = false,
         version = "*",
@@ -13,7 +17,7 @@ Plugin.dependencies = {
             ["<S-Tab>"] = { "select_prev", "fallback" },
             ["<Tab>"] = { "select_next", "fallback" },
           },
-          cmdline = { sources = { "cmdline" } },
+					cmdline = { sources = { "cmdline" } },
           sources = {
             default = { "lsp", "path", "buffer", "codecompanion" },
           },
@@ -31,7 +35,7 @@ Plugin.opts = {
 }
 
 Plugin.adapters = {
-  llama3 = function()
+  --[[llama3 = function()
       return require("codecompanion.adapters").extend("ollama", {
         name = "deepseek", -- Give this adapter a different name to differentiate it from the default ollama adapter
         schema = {
@@ -46,7 +50,25 @@ Plugin.adapters = {
           },
         },
       })
+  end,]]--
+
+	  gptoss = function()
+      return require("codecompanion.adapters").extend("ollama", {
+        name = "gpt", -- Give this adapter a different name to differentiate it from the default ollama adapter
+        schema = {
+          model = {
+            default = "gpt-oss:20b",
+          },
+          num_ctx = {
+            default = 16384,
+          },
+          num_predict = {
+            default = -1,
+          },
+        },
+      })
   end
+
 }
 
 -- require("lazy.minit").repro({ spec = plugins })
