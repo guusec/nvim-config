@@ -7,6 +7,7 @@ load('user.settings')
 load('user.commands')
 load('user.keymaps')
 require('user.plugins')
+require('codeql-keymaps').setup()
 
 pcall(vim.cmd.colorscheme, 'gruvbox')
 
