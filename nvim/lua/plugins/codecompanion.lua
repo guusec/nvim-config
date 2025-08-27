@@ -57,7 +57,7 @@ Plugin.adapters = {
         name = "gpt", -- Give this adapter a different name to differentiate it from the default ollama adapter
         schema = {
           model = {
-            default = "gpt-oss:20b",
+            default = "gpt-oss:latest",
           },
           num_ctx = {
             default = 16384,
