@@ -208,7 +208,3 @@ For issues specific to this configuration, check:
 2. `:Lazy` for plugin issues  
 3. `:Mason` for LSP server issues
 4. `:messages` for error messages
-
-## License
-
-This configuration is provided as-is. Feel free to modify and adapt to your needs.
