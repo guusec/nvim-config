@@ -1,6 +1,4 @@
-# Neovim Configuration
-
-A modern Neovim configuration featuring LSP support, tree-sitter highlighting, fuzzy finding, AI coding assistance, and more.
+# Giuseppe's Neovim Config
 
 ## Prerequisites
 
