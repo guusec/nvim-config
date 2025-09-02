@@ -5,6 +5,11 @@ local Plugin = {
     -- your configuration comes here
     -- or leave it empty to use the default settings
     -- refer to the configuration section below
+	debug = true,
+	keys = {
+		scroll_down = "<c-j>",
+		scroll_up = "<c-k>",
+	},
   },
   keys = {
     {
@@ -14,8 +19,6 @@ local Plugin = {
       end,
       desc = "Buffer Local Keymaps (which-key)",
     },
-		scroll_down = "<c-j>",
-		scroll_up = "<c-k>",
   },
 }
 
