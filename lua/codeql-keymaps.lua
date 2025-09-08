@@ -5,8 +5,8 @@ local M = {}
 
 -- Configuration
 local config = {
-  codeql_path = "/home/giuseppe/.local/bin/codeql",
-  codeql_packs = "/home/giuseppe/.codeql",
+  codeql_path = "/path/to/codeql",
+  codeql_packs = "/path/to/.codeql",
   results_file = function() return vim.fn.getcwd() .. "/codeql_results.sarif" end,
   markdown_file = function() return vim.fn.getcwd() .. "/codeql_results.md" end,
   database_suffix = "-codeql-db",
