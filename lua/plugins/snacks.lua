@@ -11,7 +11,7 @@ local Plugin =
 			sections = {
 				{
 					section = "terminal",
-					cmd = "chafa ~/.config/nvim/momo.png --format symbols --symbols vhalf --size 60x17; sleep .1",
+					cmd = "cat momo.txt; sleep .1",
 					height = 17,
 					padding = 1,
 				},
