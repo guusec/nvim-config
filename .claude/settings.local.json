@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//tmp/codecompanion.nvim/lua/codecompanion/strategies/chat/**)",
+      "Read(//tmp/codecompanion.nvim/**)",
+      "Bash(find:*)",
+      "Bash(grep:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
