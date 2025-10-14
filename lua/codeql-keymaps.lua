@@ -81,79 +81,138 @@ local function run_command(cmd, callback)
   return job_id
 end
 
--- Function to detect language from directory
-local function detect_language(directory)
-  local js_patterns = {"*.js", "*.jsx", "*.ts", "*.tsx", "*.vue"}
-  local py_patterns = {"*.py", "*.pyw", "*.pyi"}
-  local java_patterns = {"*.java", "*.kt"}
-  local go_patterns = {"*.go"}
-  local cpp_patterns = {"*.cpp", "*.cc", "*.cxx", "*.c", "*.h", "*.hpp"}
-  local csharp_patterns = {"*.cs"}
-  local ruby_patterns = {"*.rb"}
-  
-  -- Check for Python project indicators first (more reliable than just .py files)
-  local python_indicators = {
-    "requirements.txt", "setup.py", "pyproject.toml", "Pipfile", 
-    "environment.yml", "conda.yml", "tox.ini", "pytest.ini"
+-- Language configuration for CodeQL
+local language_config = {
+  cpp = {
+    extensions = {".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".hxx", ".C", ".H"},
+    indicators = {"CMakeLists.txt", "Makefile", "*.vcxproj"},
+    query_pack = "codeql/cpp-queries:codeql-suites/cpp-security-and-quality.qls"
+  },
+  go = {
+    extensions = {".go"},
+    indicators = {"go.mod", "go.sum", "Gopkg.toml"},
+    query_pack = "codeql/go-queries:codeql-suites/go-security-and-quality.qls"
+  },
+  java = {
+    extensions = {".java", ".kt", ".kts"},
+    indicators = {"pom.xml", "build.gradle", "build.gradle.kts", "build.xml"},
+    query_pack = "codeql/java-queries:codeql-suites/java-security-and-quality.qls"
+  },
+  javascript = {
+    extensions = {".js", ".jsx", ".ts", ".tsx", ".vue", ".mjs", ".cjs"},
+    indicators = {"package.json", "tsconfig.json", "jsconfig.json", "webpack.config.js"},
+    query_pack = "codeql/javascript-queries:codeql-suites/javascript-security-and-quality.qls"
+  },
+  python = {
+    extensions = {".py", ".pyw", ".pyi"},
+    indicators = {"requirements.txt", "setup.py", "pyproject.toml", "Pipfile", "poetry.lock",
+                  "environment.yml", "conda.yml", "tox.ini", "pytest.ini"},
+    query_pack = "codeql/python-queries:codeql-suites/python-security-and-quality.qls"
+  },
+  rust = {
+    extensions = {".rs"},
+    indicators = {"Cargo.toml", "Cargo.lock"},
+    query_pack = "codeql/rust-queries:codeql-suites/rust-security-and-quality.qls"
   }
-  
-  for _, indicator in ipairs(python_indicators) do
-    if vim.fn.filereadable(directory .. "/" .. indicator) == 1 then
-      return "python"
+}
+
+-- Recursive file scanner to collect all file extensions in a directory
+local function scan_directory_recursive(directory, max_files)
+  max_files = max_files or 10000  -- Limit to prevent excessive scanning
+  local extensions = {}
+  local file_count = 0
+
+  -- Use find command for efficient recursive scanning
+  local handle = io.popen("find '" .. directory .. "' -type f 2>/dev/null | head -n " .. max_files)
+  if not handle then
+    return extensions
+  end
+
+  for filepath in handle:lines() do
+    file_count = file_count + 1
+
+    -- Extract extension
+    local ext = filepath:match("(%.[^/.]+)$")
+    if ext then
+      extensions[ext:lower()] = (extensions[ext:lower()] or 0) + 1
+    end
+
+    -- Stop if we've hit the limit
+    if file_count >= max_files then
+      break
     end
   end
-  
-  -- Check for Python virtual environment
-  if vim.fn.isdirectory(directory .. "/venv") == 1 or 
-     vim.fn.isdirectory(directory .. "/.venv") == 1 or
-     vim.fn.isdirectory(directory .. "/env") == 1 then
-    return "python"
+  handle:close()
+
+  return extensions
+end
+
+-- Detect all languages present in a directory
+local function detect_languages(directory)
+  local detected_languages = {}
+  local language_scores = {}
+
+  -- Initialize scores
+  for lang, _ in pairs(language_config) do
+    language_scores[lang] = 0
   end
-  
-  -- Language detection by file patterns (ordered by priority)
-  for _, pattern in ipairs(py_patterns) do
-    if vim.fn.glob(directory .. "/**/" .. pattern) ~= "" then
-      return "python"
+
+  -- Check for project indicators (high confidence)
+  for lang, config in pairs(language_config) do
+    for _, indicator in ipairs(config.indicators) do
+      if indicator:find("%*") then
+        -- Pattern-based indicator
+        if vim.fn.glob(directory .. "/" .. indicator) ~= "" then
+          language_scores[lang] = language_scores[lang] + 10
+        end
+      else
+        -- Exact file indicator
+        if vim.fn.filereadable(directory .. "/" .. indicator) == 1 then
+          language_scores[lang] = language_scores[lang] + 10
+        end
+      end
     end
   end
-  
-  for _, pattern in ipairs(js_patterns) do
-    if vim.fn.glob(directory .. "/**/" .. pattern) ~= "" then
-      return "javascript"
+
+  -- Scan directory for file extensions
+  vim.notify("🔍 Scanning directory for source files...", vim.log.levels.INFO)
+  local extensions = scan_directory_recursive(directory)
+
+  -- Count files by language based on extensions
+  for lang, config in pairs(language_config) do
+    for _, ext in ipairs(config.extensions) do
+      local count = extensions[ext:lower()] or 0
+      if count > 0 then
+        language_scores[lang] = language_scores[lang] + count
+      end
     end
   end
-  
-  for _, pattern in ipairs(java_patterns) do
-    if vim.fn.glob(directory .. "/**/" .. pattern) ~= "" then
-      return "java"
+
+  -- Add languages with significant presence
+  local min_threshold = 1
+  for lang, score in pairs(language_scores) do
+    if score >= min_threshold then
+      table.insert(detected_languages, {
+        name = lang,
+        score = score
+      })
     end
   end
-  
-  for _, pattern in ipairs(go_patterns) do
-    if vim.fn.glob(directory .. "/**/" .. pattern) ~= "" then
-      return "go"
-    end
+
+  -- Sort by score (most prevalent first)
+  table.sort(detected_languages, function(a, b)
+    return a.score > b.score
+  end)
+
+  return detected_languages
+end
+
+-- Get primary language from detected languages (for backward compatibility)
+local function get_primary_language(languages)
+  if #languages == 0 then
+    return "javascript"  -- default fallback
   end
-  
-  for _, pattern in ipairs(cpp_patterns) do
-    if vim.fn.glob(directory .. "/**/" .. pattern) ~= "" then
-      return "cpp"
-    end
-  end
-  
-  for _, pattern in ipairs(csharp_patterns) do
-    if vim.fn.glob(directory .. "/**/" .. pattern) ~= "" then
-      return "csharp"
-    end
-  end
-  
-  for _, pattern in ipairs(ruby_patterns) do
-    if vim.fn.glob(directory .. "/**/" .. pattern) ~= "" then
-      return "ruby"
-    end
-  end
-  
-  return "javascript" -- default fallback
+  return languages[1].name
 end
 
 -- Helper functions for database persistence
@@ -331,14 +390,14 @@ local function json_decode(str)
   end
 end
 
-local function save_database_info(db_path, language, source_dir)
+local function save_database_info(db_path, languages, source_dir)
   local db_info = {
     path = db_path,
-    language = language,
+    languages = languages,  -- Now stores array of languages
     source_dir = source_dir,
     created = os.time()
   }
-  
+
   local file = io.open(config.database_cache, "w")
   if file then
     file:write(json_encode(db_info))
@@ -352,11 +411,11 @@ local function load_database_info()
     if file then
       local content = file:read("*a")
       file:close()
-      
+
       local ok, db_info = pcall(json_decode, content)
       if ok and db_info and db_info.path and vim.fn.isdirectory(db_info.path) == 1 then
         vim.g.codeql_current_db = db_info.path
-        vim.g.codeql_current_language = db_info.language
+        vim.g.codeql_current_languages = db_info.languages or {db_info.language}  -- Support old format
         return db_info
       end
     end
@@ -366,112 +425,246 @@ end
 
 -- Auto-discover database in current directory
 local function find_database_in_dir(directory)
-  local db_pattern = directory .. "/*" .. config.database_suffix
+  -- Look for language-specific databases (e.g., myproject-codeql-db-python)
+  local db_pattern = directory .. "/*" .. config.database_suffix .. "-*"
   local matches = vim.fn.glob(db_pattern, false, true)
-  
-  for _, match in ipairs(matches) do
-    if vim.fn.isdirectory(match) == 1 then
-      local language = detect_language(directory)
-      vim.g.codeql_current_db = match
-      vim.g.codeql_current_language = language
-      save_database_info(match, language, directory)
-      return match
-    end
+
+  if #matches == 0 then
+    -- Fallback: look for old-style single database
+    db_pattern = directory .. "/*" .. config.database_suffix
+    matches = vim.fn.glob(db_pattern, false, true)
   end
-  
+
+  if #matches > 0 then
+    -- Extract base database path (remove language suffix if present)
+    local first_match = matches[1]
+    local base_db_path = first_match:match("^(.+%-codeql%-db)")
+
+    if not base_db_path then
+      base_db_path = first_match
+    end
+
+    local languages = detect_languages(directory)
+    vim.g.codeql_current_db = base_db_path
+    vim.g.codeql_current_languages = languages
+    save_database_info(base_db_path, languages, directory)
+    return base_db_path
+  end
+
   return nil
 end
 
 -- Get current database (try multiple sources)
 local function get_current_database()
-  -- 1. Check session variables
-  if vim.g.codeql_current_db and vim.fn.isdirectory(vim.g.codeql_current_db) == 1 then
-    return vim.g.codeql_current_db
+  local cwd = vim.fn.getcwd()
+
+  -- 1. First, always check current directory for databases
+  local found_db = find_database_in_dir(cwd)
+  if found_db then
+    return found_db
   end
-  
-  -- 2. Try to load from cache
+
+  -- 2. Check session variables (in case we switched directories)
+  if vim.g.codeql_current_db then
+    -- Verify the database still exists
+    local base_path = vim.g.codeql_current_db
+    -- Check if at least one language-specific database exists
+    local languages = vim.g.codeql_current_languages or {}
+    for _, lang in ipairs(languages) do
+      local lang_db_path = base_path .. "-" .. lang.name
+      if vim.fn.isdirectory(lang_db_path) == 1 then
+        return base_path
+      end
+    end
+  end
+
+  -- 3. Try to load from cache as last resort
   local db_info = load_database_info()
   if db_info then
     return db_info.path
   end
-  
-  -- 3. Auto-discover in current directory
-  local found_db = find_database_in_dir(vim.fn.getcwd())
-  if found_db then
-    return found_db
-  end
-  
+
   return nil
 end
 
--- 1. Create CodeQL Database
+-- 1. Create CodeQL Database (Multi-language support)
 function M.create_database()
   vim.ui.input({
     prompt = "Enter directory to scan (or press Enter for current): ",
     default = vim.fn.getcwd(),
   }, function(input)
     if not input then return end
-    
+
     local source_dir = vim.fn.expand(input)
     local db_name = vim.fn.fnamemodify(source_dir, ":t") .. config.database_suffix
     local db_path = source_dir .. "/" .. db_name
-    local language = detect_language(source_dir)
-    
+
+    -- Detect all languages in the directory
+    local languages = detect_languages(source_dir)
+
+    if #languages == 0 then
+      vim.notify("❌ No supported languages detected in " .. source_dir, vim.log.levels.WARN)
+      vim.notify("Supported: cpp, go, java, javascript, python, rust", vim.log.levels.INFO)
+      return
+    end
+
+    -- Display detected languages
+    local lang_names = {}
+    for _, lang in ipairs(languages) do
+      table.insert(lang_names, lang.name .. " (" .. lang.score .. " files)")
+    end
+    vim.notify("📊 Detected languages: " .. table.concat(lang_names, ", "), vim.log.levels.INFO)
+
     -- Remove existing database if it exists
     if vim.fn.isdirectory(db_path) == 1 then
       vim.fn.delete(db_path, "rf")
     end
-    
-    vim.notify("Creating CodeQL database for " .. language .. " in " .. source_dir, vim.log.levels.INFO)
-    
-    local cmd = {
-      config.codeql_path,
-      "database",
-      "create",
-      db_path,
-      "--language=" .. language,
-      "--source-root=" .. source_dir,
-      "--overwrite"
-    }
-    
-    run_command(cmd, function()
-      vim.notify("✅ CodeQL database created: " .. db_path, vim.log.levels.INFO)
-      -- Store the database path for later use
-      vim.g.codeql_current_db = db_path
-      vim.g.codeql_current_language = language
-      save_database_info(db_path, language, source_dir)
-    end)
+
+    -- Create databases for each detected language
+    local function create_next_db(idx)
+      if idx > #languages then
+        vim.notify("✅ All CodeQL databases created successfully!", vim.log.levels.INFO)
+        vim.notify("📂 Base path: " .. db_path, vim.log.levels.INFO)
+        vim.g.codeql_current_db = db_path
+        vim.g.codeql_current_languages = languages
+        save_database_info(db_path, languages, source_dir)
+        return
+      end
+
+      local lang = languages[idx].name
+      local lang_db_path = db_path .. "-" .. lang
+
+      vim.notify("🔨 [" .. idx .. "/" .. #languages .. "] Creating " .. lang .. " database...", vim.log.levels.INFO)
+      vim.notify("   📂 " .. lang_db_path, vim.log.levels.INFO)
+
+      local cmd = {
+        config.codeql_path,
+        "database",
+        "create",
+        lang_db_path,
+        "--language=" .. lang,
+        "--source-root=" .. source_dir,
+        "--overwrite"
+      }
+
+      run_command(cmd, function()
+        vim.notify("✅ " .. lang .. " database created", vim.log.levels.INFO)
+        create_next_db(idx + 1)
+      end)
+    end
+
+    create_next_db(1)
   end)
 end
 
--- 2. Scan Database
+-- 2. Scan Database (Multi-language support)
 function M.scan_database()
   local db_path = get_current_database()
-  local language = vim.g.codeql_current_language or "javascript"
-  
+  local languages = vim.g.codeql_current_languages
+
   if not db_path then
-    vim.notify("No CodeQL database found. Create one first with <leader>cd or try <leader>cq", vim.log.levels.WARN)
+    vim.notify("❌ No CodeQL database found in " .. vim.fn.getcwd(), vim.log.levels.WARN)
+    vim.notify("💡 Create one first with <leader>cd or try <leader>cq", vim.log.levels.INFO)
     return
   end
-  
-  vim.notify("🔍 Scanning database with " .. language .. " security queries...", vim.log.levels.INFO)
-  vim.notify("Database: " .. db_path, vim.log.levels.INFO)
-  
+
+  vim.notify("📂 Found database: " .. db_path, vim.log.levels.INFO)
+
+  if not languages or #languages == 0 then
+    vim.notify("❌ No language information found. Please recreate the database.", vim.log.levels.ERROR)
+    return
+  end
+
+  -- Display scanning info
+  local lang_names = {}
+  for _, lang in ipairs(languages) do
+    table.insert(lang_names, lang.name)
+  end
+  vim.notify("🔍 Scanning databases for: " .. table.concat(lang_names, ", "), vim.log.levels.INFO)
+
   local results_file = config.results_file()
-  local cmd = {
-    config.codeql_path,
-    "database",
-    "analyze",
-    db_path,
-    "--format=sarif-latest",
-    "--output=" .. results_file,
-    "--search-path=" .. config.codeql_packs,
-    "codeql/" .. language .. "-queries:codeql-suites/" .. language .. "-security-and-quality.qls"
-  }
-  
-  run_command(cmd, function()
-    vim.notify("✅ CodeQL scan completed. Results saved to " .. results_file, vim.log.levels.INFO)
-  end)
+  local all_results = {runs = {}}
+
+  -- Scan each language database
+  local function scan_next_language(idx)
+    if idx > #languages then
+      -- Merge all results into a single SARIF file
+      if #all_results.runs > 0 then
+        local merged_sarif = {
+          version = "2.1.0",
+          ["$schema"] = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+          runs = all_results.runs
+        }
+
+        local file = io.open(results_file, "w")
+        if file then
+          file:write(vim.fn.json_encode(merged_sarif))
+          file:close()
+          vim.notify("✅ All language scans completed. Results merged to " .. results_file, vim.log.levels.INFO)
+          vim.schedule(function()
+            M.show_results()
+          end)
+        else
+          vim.notify("❌ Failed to write merged results", vim.log.levels.ERROR)
+        end
+      else
+        vim.notify("⚠️  All scans completed but no results generated", vim.log.levels.WARN)
+      end
+      return
+    end
+
+    local lang = languages[idx].name
+    local lang_db_path = db_path .. "-" .. lang
+
+    if vim.fn.isdirectory(lang_db_path) == 0 then
+      vim.notify("⚠️  Database not found for " .. lang .. ", skipping...", vim.log.levels.WARN)
+      scan_next_language(idx + 1)
+      return
+    end
+
+    vim.notify("🔍 Scanning " .. idx .. "/" .. #languages .. ": " .. lang .. " security queries...", vim.log.levels.INFO)
+
+    local lang_results_file = results_file:gsub("%.sarif$", "_" .. lang .. ".sarif")
+    local query_pack = language_config[lang].query_pack
+
+    local cmd = {
+      config.codeql_path,
+      "database",
+      "analyze",
+      lang_db_path,
+      "--format=sarif-latest",
+      "--output=" .. lang_results_file,
+      "--search-path=" .. config.codeql_packs,
+      query_pack
+    }
+
+    run_command(cmd, function()
+      vim.notify("✅ " .. lang .. " scan completed", vim.log.levels.INFO)
+
+      -- Read and merge results
+      if vim.fn.filereadable(lang_results_file) == 1 then
+        local file = io.open(lang_results_file, "r")
+        if file then
+          local content = file:read("*a")
+          file:close()
+
+          local ok, sarif = pcall(vim.fn.json_decode, content)
+          if ok and sarif and sarif.runs then
+            for _, run in ipairs(sarif.runs) do
+              table.insert(all_results.runs, run)
+            end
+          end
+
+          -- Clean up individual result file
+          vim.fn.delete(lang_results_file)
+        end
+      end
+
+      scan_next_language(idx + 1)
+    end)
+  end
+
+  scan_next_language(1)
 end
 
 -- Generate Markdown Report
@@ -1112,35 +1305,31 @@ function M.run_prettier()
   end)
 end
 
--- 6. Python-specific Security Scan
+-- 6. Python-specific Security Scan (uses multi-language detection but filters for Python)
 function M.python_security_scan()
   vim.ui.input({
     prompt = "Enter Python project directory (or press Enter for current): ",
     default = vim.fn.getcwd(),
   }, function(input)
     if not input then return end
-    
+
     local source_dir = vim.fn.expand(input)
     local db_name = vim.fn.fnamemodify(source_dir, ":t") .. config.database_suffix
     local db_path = source_dir .. "/" .. db_name
-    
-    -- Force Python language
-    local language = "python"
-    
-    -- Check if this looks like a Python project
-    local python_indicators = {
-      "requirements.txt", "setup.py", "pyproject.toml", "Pipfile"
-    }
-    
-    local found_python = false
-    for _, indicator in ipairs(python_indicators) do
-      if vim.fn.filereadable(source_dir .. "/" .. indicator) == 1 then
-        found_python = true
+
+    -- Detect languages
+    local languages = detect_languages(source_dir)
+
+    -- Filter for Python
+    local python_lang = nil
+    for _, lang in ipairs(languages) do
+      if lang.name == "python" then
+        python_lang = lang
         break
       end
     end
-    
-    if not found_python and vim.fn.glob(source_dir .. "/**/*.py") == "" then
+
+    if not python_lang then
       vim.ui.input({
         prompt = "No Python files detected. Continue anyway? (y/N): ",
       }, function(confirm)
@@ -1148,18 +1337,20 @@ function M.python_security_scan()
           vim.notify("Python scan cancelled", vim.log.levels.INFO)
           return
         end
-        start_python_scan(source_dir, db_path, language)
+        -- Force Python language
+        python_lang = {name = "python", score = 1}
+        start_python_scan(source_dir, db_path, python_lang)
       end)
     else
-      start_python_scan(source_dir, db_path, language)
+      start_python_scan(source_dir, db_path, python_lang)
     end
   end)
 end
 
 -- Helper function to start Python scan
-local function start_python_scan(source_dir, db_path, language)
+local function start_python_scan(source_dir, db_path, python_lang)
   vim.notify("🐍 Starting Python security scan of " .. source_dir, vim.log.levels.INFO)
-  
+
   -- Check for virtual environment and provide guidance
   local venv_paths = {source_dir .. "/venv", source_dir .. "/.venv", source_dir .. "/env"}
   local venv_found = false
@@ -1170,43 +1361,48 @@ local function start_python_scan(source_dir, db_path, language)
       break
     end
   end
-  
+
   if not venv_found then
     vim.notify("💡 Tip: CodeQL works better with Python virtual environments", vim.log.levels.INFO)
   end
-  
+
+  local lang_db_path = db_path .. "-python"
+
   -- Remove existing database if it exists
-  if vim.fn.isdirectory(db_path) == 1 then
-    vim.fn.delete(db_path, "rf")
+  if vim.fn.isdirectory(lang_db_path) == 1 then
+    vim.fn.delete(lang_db_path, "rf")
   end
-  
+
   local create_cmd = {
     config.codeql_path,
     "database",
     "create",
-    db_path,
+    lang_db_path,
     "--language=python",
     "--source-root=" .. source_dir,
     "--overwrite"
   }
-  
+
   run_command(create_cmd, function()
     vim.g.codeql_current_db = db_path
-    vim.g.codeql_current_language = "python"
-    
+    vim.g.codeql_current_languages = {python_lang}
+    save_database_info(db_path, {python_lang}, source_dir)
+
     -- Step 2: Analyze with Python security queries
     local results_file = config.results_file()
+    local query_pack = language_config["python"].query_pack
+
     local analyze_cmd = {
       config.codeql_path,
       "database",
       "analyze",
-      db_path,
+      lang_db_path,
       "--format=sarif-latest",
       "--output=" .. results_file,
       "--search-path=" .. config.codeql_packs,
-      "codeql/python-queries:codeql-suites/python-security-and-quality.qls"
+      query_pack
     }
-    
+
     vim.notify("🔍 Running Python security analysis...", vim.log.levels.INFO)
     run_command(analyze_cmd, function()
       -- Step 3: Show results
@@ -1218,60 +1414,134 @@ local function start_python_scan(source_dir, db_path, language)
   end)
 end
 
--- 7. Quick Security Scan (combines all steps)
+-- 7. Quick Security Scan (combines all steps with multi-language support)
 function M.quick_scan()
   vim.ui.input({
     prompt = "Enter directory to scan (or press Enter for current): ",
     default = vim.fn.getcwd(),
   }, function(input)
     if not input then return end
-    
+
     local source_dir = vim.fn.expand(input)
     local db_name = vim.fn.fnamemodify(source_dir, ":t") .. config.database_suffix
     local db_path = source_dir .. "/" .. db_name
-    local language = detect_language(source_dir)
-    
-    vim.notify("🚀 Starting quick security scan of " .. source_dir, vim.log.levels.INFO)
-    
-    -- Step 1: Create database
-    if vim.fn.isdirectory(db_path) == 1 then
-      vim.fn.delete(db_path, "rf")
+
+    -- Detect all languages
+    local languages = detect_languages(source_dir)
+
+    if #languages == 0 then
+      vim.notify("❌ No supported languages detected", vim.log.levels.WARN)
+      return
     end
-    
-    local create_cmd = {
-      config.codeql_path,
-      "database",
-      "create",
-      db_path,
-      "--language=" .. language,
-      "--source-root=" .. source_dir,
-      "--overwrite"
-    }
-    
-    run_command(create_cmd, function()
-      vim.g.codeql_current_db = db_path
-      vim.g.codeql_current_language = language
-      
-      -- Step 2: Analyze database
-      local results_file = config.results_file()
-      local analyze_cmd = {
+
+    -- Display detected languages
+    local lang_names = {}
+    for _, lang in ipairs(languages) do
+      table.insert(lang_names, lang.name)
+    end
+    vim.notify("🚀 Quick scan starting for: " .. table.concat(lang_names, ", "), vim.log.levels.INFO)
+
+    -- Remove existing databases
+    for _, lang in ipairs(languages) do
+      local lang_db_path = db_path .. "-" .. lang.name
+      if vim.fn.isdirectory(lang_db_path) == 1 then
+        vim.fn.delete(lang_db_path, "rf")
+      end
+    end
+
+    local results_file = config.results_file()
+    local all_results = {runs = {}}
+
+    -- Create database and scan for each language
+    local function process_next_language(idx)
+      if idx > #languages then
+        -- Merge all results
+        if #all_results.runs > 0 then
+          local merged_sarif = {
+            version = "2.1.0",
+            ["$schema"] = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            runs = all_results.runs
+          }
+
+          local file = io.open(results_file, "w")
+          if file then
+            file:write(vim.fn.json_encode(merged_sarif))
+            file:close()
+
+            vim.g.codeql_current_db = db_path
+            vim.g.codeql_current_languages = languages
+            save_database_info(db_path, languages, source_dir)
+
+            vim.notify("✅ Quick scan complete! Showing results...", vim.log.levels.INFO)
+            vim.schedule(function()
+              M.show_results()
+            end)
+          end
+        else
+          vim.notify("⚠️  Scan completed but no results found", vim.log.levels.WARN)
+        end
+        return
+      end
+
+      local lang = languages[idx].name
+      local lang_db_path = db_path .. "-" .. lang
+
+      vim.notify("🔨 [" .. idx .. "/" .. #languages .. "] Creating " .. lang .. " database...", vim.log.levels.INFO)
+
+      -- Create database
+      local create_cmd = {
         config.codeql_path,
         "database",
-        "analyze",
-        db_path,
-        "--format=sarif-latest",
-        "--output=" .. results_file,
-        "--search-path=" .. config.codeql_packs,
-        "codeql/" .. language .. "-queries:codeql-suites/" .. language .. "-security-and-quality.qls"
+        "create",
+        lang_db_path,
+        "--language=" .. lang,
+        "--source-root=" .. source_dir,
+        "--overwrite"
       }
-      
-      run_command(analyze_cmd, function()
-        -- Step 3: Show results
-        vim.schedule(function()
-          M.show_results()
+
+      run_command(create_cmd, function()
+        vim.notify("🔍 [" .. idx .. "/" .. #languages .. "] Scanning " .. lang .. "...", vim.log.levels.INFO)
+
+        -- Analyze database
+        local lang_results_file = results_file:gsub("%.sarif$", "_" .. lang .. ".sarif")
+        local query_pack = language_config[lang].query_pack
+
+        local analyze_cmd = {
+          config.codeql_path,
+          "database",
+          "analyze",
+          lang_db_path,
+          "--format=sarif-latest",
+          "--output=" .. lang_results_file,
+          "--search-path=" .. config.codeql_packs,
+          query_pack
+        }
+
+        run_command(analyze_cmd, function()
+          -- Read and merge results
+          if vim.fn.filereadable(lang_results_file) == 1 then
+            local file = io.open(lang_results_file, "r")
+            if file then
+              local content = file:read("*a")
+              file:close()
+
+              local ok, sarif = pcall(vim.fn.json_decode, content)
+              if ok and sarif and sarif.runs then
+                for _, run in ipairs(sarif.runs) do
+                  table.insert(all_results.runs, run)
+                end
+              end
+
+              vim.fn.delete(lang_results_file)
+            end
+          end
+
+          process_next_language(idx + 1)
         end)
       end)
-    end)
+    end
+
+    process_next_language(1)
   end)
 end
 
